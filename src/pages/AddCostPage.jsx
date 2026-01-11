@@ -14,8 +14,10 @@ import {
   Typography,
 } from "@mui/material";
 
+// Supported currency codes for cost items
 const CURRENCIES = ["USD", "ILS", "GBP", "EURO"];
 
+// Available cost categories
 const CATEGORIES = [
   "Food",
   "Car",
@@ -26,6 +28,11 @@ const CATEGORIES = [
   "Other",
 ];
 
+/**
+ * AddCostPage Component
+ * Form for adding new cost items to the database
+ * Includes validation and error handling
+ */
 export default function AddCostPage() {
   const [sum, setSum] = useState("");
   const [currency, setCurrency] = useState("USD");
@@ -33,44 +40,63 @@ export default function AddCostPage() {
   const [description, setDescription] = useState("");
   const [msg, setMsg] = useState(null);
 
+  /**
+   * Validates form inputs and returns error messages
+   * Recalculates whenever form values change
+   */
   const errors = useMemo(() => {
     const e = {};
     const n = Number(sum);
 
+    // Validate sum: must be provided, numeric, and positive
     if (sum === "") e.sum = "Required";
     else if (Number.isNaN(n)) e.sum = "Must be a number";
     else if (n <= 0) e.sum = "Must be > 0";
 
+    // Validate currency and category: must be selected
     if (!currency) e.currency = "Required";
     if (!category) e.category = "Required";
 
+    // Validate description: must be provided and at least 2 characters
     if (!description.trim()) e.description = "Required";
     else if (description.trim().length < 2) e.description = "Too short";
 
     return e;
   }, [sum, currency, category, description]);
 
+  // Check if form is valid (no errors)
   const isValid = Object.keys(errors).length === 0;
 
+  /**
+   * Clears all form fields and resets to default values
+   * Intentionally keeps msg to show success/error messages
+   */
   function onClear() {
     setSum("");
     setCurrency("USD");
     setCategory("Food");
     setDescription("");
-    // בכוונה לא מוחקים msg כדי לראות הודעת הצלחה/שגיאה
+    // Intentionally don't clear msg to show success/error messages
   }
 
+  /**
+   * Handles form submission
+   * Validates form, opens database, and saves the cost item
+   * @param {Event} e - Form submit event
+   */
   function onSubmit(e) {
     e.preventDefault();
     console.log("SUBMIT CLICKED");
     setMsg(null);
 
+    // Validate form before submission
     if (!isValid) {
       console.log("FORM INVALID", errors);
       setMsg({ type: "error", text: "Fix the form errors first." });
       return;
     }
 
+    // Prepare cost data for saving
     const payload = {
       sum: Number(sum),
       currency,
@@ -80,6 +106,7 @@ export default function AddCostPage() {
 
     console.log("PAYLOAD", payload);
 
+    // Open database and save the cost item
     openCostsDB("costsdb", 1)
       .then((db) => {
         console.log("DB OPENED", db);
@@ -88,6 +115,7 @@ export default function AddCostPage() {
       .then((saved) => {
         console.log("SAVED", saved);
         setMsg({ type: "success", text: "Cost item saved." });
+        // Clear form after successful save
         onClear();
       })
       .catch((err) => {
@@ -99,6 +127,7 @@ export default function AddCostPage() {
       });
   }
 
+  // Render the add cost form with validation and error messages
   return (
     <Box sx={{ maxWidth: 720 }}>
       <Typography variant="h5" sx={{ mb: 2 }}>

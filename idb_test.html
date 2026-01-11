@@ -6,10 +6,11 @@
 </head>
 <body>
 
-  <!-- 1️⃣ קודם טוענים את idb.js -->
+  <!-- First, load the idb.js library -->
   <script src="idb.js"></script>
 
   <script>
+    // Set up test settings with exchange rates URL
     localStorage.setItem(
       "cm_settings_v1",
       JSON.stringify({
@@ -17,10 +18,14 @@
       })
     );
   
+    /**
+     * Test function to verify IndexedDB operations
+     * Opens the database, adds a test cost, and retrieves a yearly report
+     */
     async function test() {
       const db = await window.idb.openCostsDB("costsdb", 1);
   
-      // אפשר להוסיף עוד נתונים אם בא לך
+      // You can add more test data here if needed
       await db.addCost({
         sum: 100,
         currency: "USD",
@@ -32,6 +37,7 @@
       console.log("YEARLY REPORT:", yearly);
     }
   
+    // Run the test function
     test();
   </script>
   

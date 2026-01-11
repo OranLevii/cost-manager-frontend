@@ -23,39 +23,61 @@ import {
 import { openCostsDB } from "../idb/idb.js";
 import { fetchRates } from "../services/ratesService.js";
 
+// Supported currency codes
 const CURRENCIES = ["USD", "ILS", "GBP", "EURO"];
 
+// Month names for display in the chart
 const MONTH_NAMES = [
   "Jan","Feb","Mar","Apr","May","Jun",
   "Jul","Aug","Sep","Oct","Nov","Dec",
 ];
 
+/**
+ * Builds yearly data aggregated by month for the bar chart
+ * @param {Array} allCosts - Array of all cost items
+ * @param {number} year - The year to filter costs by
+ * @param {string} targetCurrency - Currency to convert all costs to
+ * @param {Object} rates - Exchange rates object (e.g., { USD: 1, ILS: 3.4 })
+ * @returns {Array} Array of objects with month name and total amount
+ */
 function buildYearData(allCosts, year, targetCurrency, rates) {
+  // Initialize array with 12 zeros (one for each month)
   const totals = Array(12).fill(0);
 
+  // Process each cost item
   for (let i = 0; i < allCosts.length; i++) {
     const c = allCosts[i];
+    // Skip costs that don't match the target year
     if (c?.date?.year !== year) continue;
 
+    // Get exchange rates for conversion
     const fromRate = rates[c.currency];
     const toRate = rates[targetCurrency];
     if (!fromRate || !toRate) continue;
 
+    // Convert to USD first, then to target currency
     const usd = Number(c.sum) / fromRate;
     const converted = usd * toRate;
 
+    // Convert month from 1-12 to 0-11 for array indexing
     const m = c.date.month - 1; // 0-11
     if (m >= 0 && m < 12) {
       totals[m] += converted;
     }
   }
 
+  // Map totals to chart data format with month names and rounded values
   return totals.map((v, i) => ({
     month: MONTH_NAMES[i],
     total: Math.round(v * 100) / 100,
   }));
 }
 
+/**
+ * BarChartPage Component
+ * Displays a bar chart showing monthly costs for a selected year
+ * Allows filtering by year and currency
+ */
 export default function BarChartPage() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [currency, setCurrency] = useState("USD");
@@ -63,6 +85,10 @@ export default function BarChartPage() {
   const [msg, setMsg] = useState(null);
   const [data, setData] = useState([]);
 
+  /**
+   * Fetches and processes data for the bar chart
+   * Retrieves costs for all 12 months of the selected year
+   */
   function onRun() {
     setMsg(null);
     setData([]);
@@ -70,13 +96,13 @@ export default function BarChartPage() {
     fetchRates()
       .then((rates) =>
         openCostsDB("costsdb", 1).then((db) =>
-          // נשלוף את כל הנתונים דרך getReport לכל חודש
+          // Fetch all data through getReport for each month
           Promise.all(
             Array.from({ length: 12 }, (_, i) =>
               db.getReport(year, i + 1, currency, rates)
             )
           ).then((reports) => {
-            // מאחדים את כל ה-costs מכל החודשים
+            // Combine all costs from all months
             const allCosts = reports.flatMap((r) =>
               r.costs.map((c) => ({
                 ...c,
@@ -96,6 +122,7 @@ export default function BarChartPage() {
       });
   }
 
+  // Render the bar chart page with controls and chart visualization
   return (
     <Box sx={{ maxWidth: 1000 }}>
       <Typography variant="h5" sx={{ mb: 2 }}>

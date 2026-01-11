@@ -15,32 +15,53 @@ import { PieChart, Pie, Tooltip, Legend, ResponsiveContainer, Cell } from "recha
 import { openCostsDB } from "../idb/idb.js";
 import { fetchRates } from "../services/ratesService.js";
 
+// Supported currency codes
 const CURRENCIES = ["USD", "ILS", "GBP", "EURO"];
+// Color palette for pie chart segments
 const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#A28BFF", "#FF5A7A", "#7DD3FC"];
 
+/**
+ * Builds pie chart data aggregated by category
+ * Converts all costs to the target currency
+ * @param {Object} report - Report object containing costs array
+ * @param {string} targetCurrency - Currency to convert all costs to
+ * @param {Object} rates - Exchange rates object
+ * @returns {Array} Array of objects with category name and total value
+ */
 function buildCategoryData(report, targetCurrency, rates) {
+  // Map to aggregate costs by category
   const map = {};
 
+  // Process each cost item
   for (let i = 0; i < report.costs.length; i++) {
     const c = report.costs[i];
 
+    // Get exchange rates for conversion
     const fromRate = rates[c.currency];
     const toRate = rates[targetCurrency];
     if (!fromRate || !toRate) continue;
 
+    // Convert to USD first, then to target currency
     const usd = Number(c.sum) / fromRate;
     const converted = usd * toRate;
 
+    // Aggregate by category (default to "Other" if missing)
     const key = c.category || "Other";
     map[key] = (map[key] || 0) + converted;
   }
 
+  // Convert map to array format for pie chart
   return Object.keys(map).map((k) => ({
     name: k,
     value: Math.round(map[k] * 100) / 100,
   }));
 }
 
+/**
+ * PieChartPage Component
+ * Displays a pie chart showing cost distribution by category for a selected month
+ * Allows filtering by year, month, and currency
+ */
 export default function PieChartPage() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth() + 1);
@@ -49,10 +70,15 @@ export default function PieChartPage() {
   const [msg, setMsg] = useState(null);
   const [data, setData] = useState([]);
 
+  /**
+   * Fetches and processes data for the pie chart
+   * Retrieves costs for the selected month and aggregates by category
+   */
   function onRun() {
     setMsg(null);
     setData([]);
 
+    // Fetch rates, then get report, then build chart data
     fetchRates()
       .then((rates) =>
         openCostsDB("costsdb", 1).then((db) =>
@@ -71,6 +97,7 @@ export default function PieChartPage() {
       });
   }
 
+  // Render the pie chart page with controls and chart visualization
   return (
     <Box sx={{ maxWidth: 1000 }}>
       <Typography variant="h5" sx={{ mb: 2 }}>

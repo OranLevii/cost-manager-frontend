@@ -14,8 +14,15 @@ import {
 import { openCostsDB } from "../idb/idb.js";
 import { fetchRates } from "../services/ratesService.js";
 
+// Supported currency codes
 const CURRENCIES = ["USD", "ILS", "GBP", "EURO"];
 
+/**
+ * ReportPage Component
+ * Displays a detailed monthly report with all cost items
+ * Shows costs in a table format with total summary
+ * Allows filtering by year, month, and currency
+ */
 export default function ReportPage() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth() + 1);
@@ -24,10 +31,15 @@ export default function ReportPage() {
   const [msg, setMsg] = useState(null);
   const [report, setReport] = useState(null);
 
+  /**
+   * Fetches and displays the monthly report
+   * Retrieves costs for the selected year and month, converted to selected currency
+   */
   function onRunReport() {
     setMsg(null);
     setReport(null);
 
+    // Fetch exchange rates, then get report from database
     fetchRates()
       .then((rates) => openCostsDB("costsdb", 1).then((db) => db.getReport(Number(year), Number(month), currency, rates)))
       .then((rep) => {
@@ -39,6 +51,7 @@ export default function ReportPage() {
       });
   }
 
+  // Render the report page with filters and cost table
   return (
     <Box sx={{ maxWidth: 900 }}>
       <Typography variant="h5" sx={{ mb: 2 }}>
