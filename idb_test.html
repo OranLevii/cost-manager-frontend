@@ -1,0 +1,40 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>IDB Test</title>
+</head>
+<body>
+
+  <!-- 1️⃣ קודם טוענים את idb.js -->
+  <script src="idb.js"></script>
+
+  <script>
+    localStorage.setItem(
+      "cm_settings_v1",
+      JSON.stringify({
+        ratesUrl: "https://oranlevii.github.io/cost-manager-rates/rates.json"
+      })
+    );
+  
+    async function test() {
+      const db = await window.idb.openCostsDB("costsdb", 1);
+  
+      // אפשר להוסיף עוד נתונים אם בא לך
+      await db.addCost({
+        sum: 100,
+        currency: "USD",
+        category: "Food",
+        description: "Jan food",
+      });
+  
+      const yearly = await window.idb.getYearlyReport(2026, "USD");
+      console.log("YEARLY REPORT:", yearly);
+    }
+  
+    test();
+  </script>
+  
+
+</body>
+</html>
