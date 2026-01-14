@@ -37,7 +37,7 @@ export default function ReportPage() {
 
       const db = await openCostsDB("costsdb", 1);
 
-      // ✅ מקור אמת יחיד להמרות: idb.js (כולל DEFAULT_RATES_URL + settings)
+      // Single source of truth for currency conversions is idb.js (includes DEFAULT_RATES_URL + settings)
       const rep = await db.getReport(y, m, currency);
 
       setReport(rep);

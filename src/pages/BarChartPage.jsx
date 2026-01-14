@@ -45,12 +45,12 @@ export default function BarChartPage() {
 
       const db = await openCostsDB("costsdb", 1);
 
-      // 12 reports (כאן אין ratesService ואין פרמטר rates)
+      // Fetch 12 monthly reports (conversion logic is handled inside idb.js)
       const reports = await Promise.all(
         Array.from({ length: 12 }, (_, i) => db.getReport(y, i + 1, currency))
       );
 
-      // משתמשים ב-total שכבר מחושב במטבע שבחרת
+      // Use the total already calculated in the selected currency
       const d = reports.map((rep, i) => ({
         month: MONTH_NAMES[i],
         total: Math.round(Number(rep?.total?.total || 0) * 100) / 100,
