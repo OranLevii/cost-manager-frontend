@@ -1,192 +1,222 @@
-﻿(function () {
-  "use strict";
+// IndexedDB object store name
+const STORE_NAME = "costs";
 
-  // IndexedDB object store name for cost items
-  var STORE_NAME = "costs";
-  // Global database reference
-  var _db = null;
+// Default exchange rates URL (must return JSON like:
+// { "USD":1, "GBP":0.6, "EURO":0.7, "ILS":3.4 })
+const DEFAULT_RATES_URL =
+  "https://oranlevii.github.io/cost-manager-rates/rates.json";
 
-  /**
-   * Retrieves the exchange rates URL from localStorage settings
-   * @returns {string} The rates URL or empty string if not found
-   */
-  function getRatesUrl() {
-    try {
-      var raw = localStorage.getItem("cm_settings_v1");
-      if (!raw) return "";
-      var obj = JSON.parse(raw);
-      return obj && obj.ratesUrl ? obj.ratesUrl : "";
-    } catch (e) {
-      return "";
-    }
-  }
+// LocalStorage keys
+const SETTINGS_KEY = "cm_settings_v1";
+const RATES_URL_STORAGE_KEY = "ratesUrl";
 
-  /**
-   * Fetches exchange rates from the configured URL
-   * @returns {Promise<Object>} Promise resolving to rates object
-   * @throws {Error} If URL is not set or fetch fails
-   */
-  function fetchRates() {
-    var url = getRatesUrl();
-    if (!url) return Promise.reject(new Error("Rates URL is not set"));
+// Cache for exchange rates to avoid repeated fetch calls
+let ratesCache = null;
+let ratesCacheUrl = null;
 
-    return fetch(url).then(function (res) {
-      if (!res.ok) throw new Error("Failed to fetch rates");
-      return res.json();
-    });
-  }
-
-  /**
-   * Converts an amount from one currency to another using exchange rates
-   * @param {number} amount - The amount to convert
-   * @param {string} fromCurrency - Source currency code
-   * @param {string} toCurrency - Target currency code
-   * @param {Object} rates - Exchange rates object
-   * @returns {number} Converted amount
-   * @throws {Error} If currency rates are missing
-   */
-  function convertAmount(amount, fromCurrency, toCurrency, rates) {
-    if (fromCurrency === toCurrency) return amount;
-
-    var fromRate = rates[fromCurrency];
-    var toRate = rates[toCurrency];
-    if (!fromRate || !toRate) throw new Error("Missing currency rate");
-
-    // Convert to USD first, then to target currency
-    var usd = amount / fromRate;
-    return usd * toRate;
-  }
-
-  /**
-   * Retrieves all cost items from the database
-   * @returns {Promise<Array>} Promise resolving to array of all costs
-   * @throws {Error} If database is not open
-   */
-  function getAllCosts() {
-    return new Promise(function (resolve, reject) {
-      if (!_db) return reject(new Error("DB is not open"));
-
-      var tx = _db.transaction(STORE_NAME, "readonly");
-      var store = tx.objectStore(STORE_NAME);
-
-      var req = store.getAll();
-      req.onsuccess = function () { resolve(req.result || []); };
-      req.onerror = function () { reject(req.error); };
-    });
-  }
-
-  /**
-   * Opens or creates the IndexedDB database for cost management
-   * @param {string} databaseName - Name of the database
-   * @param {number} databaseVersion - Version number for schema updates
-   * @returns {Promise<Object>} Promise resolving to database object with addCost and getReport methods
-   */
-  function openCostsDB(databaseName, databaseVersion) {
-    return new Promise(function (resolve, reject) {
-      var request = indexedDB.open(databaseName, databaseVersion);
-
-      // Handle database schema upgrades
-      request.onupgradeneeded = function (event) {
-        var db = event.target.result;
-        // Create the object store if it doesn't exist
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          db.createObjectStore(STORE_NAME, { keyPath: "id", autoIncrement: true });
-        }
-      };
-
-      // Database opened successfully
-      request.onsuccess = function () {
-        _db = request.result;
-        // Return database interface with available methods
-        resolve({ addCost: addCost, getReport: getReport });
-      };
-
-      request.onerror = function () { reject(request.error); };
-    });
-  }
-
-  /**
-   * Adds a new cost item to the database
-   * Automatically adds current date information
-   * @param {Object} cost - Cost object with sum, currency, category, description
-   * @returns {Promise<Object>} Promise resolving to saved cost item
-   * @throws {Error} If database is not open or save fails
-   */
-  function addCost(cost) {
-    return new Promise(function (resolve, reject) {
-      if (!_db) return reject(new Error("DB is not open"));
-
-      var tx = _db.transaction(STORE_NAME, "readwrite");
-      var store = tx.objectStore(STORE_NAME);
-
-      // Get current date and create cost item with date information
-      var now = new Date();
-      var item = {
-        sum: Number(cost.sum),
-        currency: String(cost.currency),
-        category: String(cost.category),
-        description: String(cost.description),
-        date: { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() },
-      };
-
-      var req = store.add(item);
-      req.onsuccess = function () {
-        resolve({
-          sum: item.sum,
-          currency: item.currency,
-          category: item.category,
-          description: item.description,
-        });
-      };
-      req.onerror = function () { reject(req.error); };
-    });
-  }
-
-  /**
-   * Generates a monthly report with costs filtered by year and month
-   * Converts all costs to the specified currency
-   * @param {number} year - Year to filter by
-   * @param {number} month - Month to filter by (1-12)
-   * @param {string} currency - Target currency for conversion
-   * @returns {Promise<Object>} Promise resolving to report object with costs and total
-   */
-  function getReport(year, month, currency) {
-    return Promise.all([getAllCosts(), fetchRates()]).then(function (arr) {
-      var all = arr[0];
-      var rates = arr[1];
-
-      // Filter costs by year and month
-      var filtered = all.filter(function (c) {
-        return c && c.date && c.date.year === year && c.date.month === month;
-      });
-
-      // Calculate total by converting all costs to target currency
-      var total = 0;
-      for (var i = 0; i < filtered.length; i++) {
-        var c = filtered[i];
-        total += convertAmount(Number(c.sum), c.currency, currency, rates);
+/**
+ * Resolve the rates URL from settings (preferred), then compat key, then default.
+ */
+function resolveRatesUrl() {
+  // 1) Try cm_settings_v1 (preferred)
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const sUrl = parsed?.ratesUrl;
+      if (typeof sUrl === "string" && sUrl.trim().length > 0) {
+        return sUrl.trim();
       }
-      // Round to 2 decimal places
-      total = Math.round(total * 100) / 100;
-
-      // Return report with filtered costs and calculated total
-      return {
-        year: year,
-        month: month,
-        costs: filtered.map(function (c) {
-          return {
-            sum: Number(c.sum),
-            currency: c.currency,
-            category: c.category,
-            description: c.description,
-            Date: { day: c.date.day },
-          };
-        }),
-        total: { currency: currency, total: total },
-      };
-    });
+    }
+  } catch (e) {
+    // ignore and fallback
   }
 
-  // Expose the database interface to the global window object
-  window.idb = { openCostsDB: openCostsDB };
-})();
+  // 2) Try direct key (compat)
+  const direct = localStorage.getItem(RATES_URL_STORAGE_KEY);
+  if (direct && direct.trim().length > 0) return direct.trim();
+
+  // 3) Default
+  return DEFAULT_RATES_URL;
+}
+
+/**
+ * Fetches exchange rates from either a user-defined URL (Settings) or the default URL.
+ * If rates were already fetched for the SAME URL, returns them from cache.
+ * @returns {Promise<Object>} Exchange rates object
+ */
+async function fetchRates() {
+  const url = resolveRatesUrl();
+
+  // If cache exists but URL changed -> invalidate cache
+  if (ratesCache && ratesCacheUrl === url) {
+    return ratesCache;
+  }
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error("Failed to fetch exchange rates");
+  }
+
+  const rates = await response.json();
+  ratesCache = rates;
+  ratesCacheUrl = url;
+  return rates;
+}
+
+/**
+ * Converts an amount between currencies using rates relative to USD.
+ * Rates are like: { USD:1, ILS:3.4, EURO:0.7, GBP:0.6 } meaning 1 USD = X currency.
+ * @param {number} amount - Original amount
+ * @param {string} fromCurrency - Source currency
+ * @param {string} toCurrency - Target currency
+ * @param {Object} rates - Exchange rates
+ * @returns {number} Converted amount
+ */
+function convertAmount(amount, fromCurrency, toCurrency, rates) {
+  if (fromCurrency === toCurrency) {
+    return amount;
+  }
+  const fromRate = rates[fromCurrency];
+  const toRate = rates[toCurrency];
+  if (!fromRate || !toRate) {
+    throw new Error("Missing currency rate");
+  }
+  // Convert to USD first, then to target currency
+  const usdAmount = amount / fromRate;
+  return usdAmount * toRate;
+}
+
+/**
+ * Retrieves all cost items from the database.
+ * @param {IDBDatabase} db - The IndexedDB database instance
+ * @returns {Promise<Array>} Promise resolving to array of all cost items
+ */
+function getAllCosts(db) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/**
+ * Opens or creates the IndexedDB database for cost management.
+ * This is the React/module version (uses export).
+ * @param {string} databaseName - Name of the database
+ * @param {number} databaseVersion - Version number for schema updates
+ * @returns {Promise<Object>} Promise resolving to database object with addCost and getReport methods
+ */
+export function openCostsDB(databaseName, databaseVersion) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(databaseName, databaseVersion);
+
+    // Handle database schema creation/upgrade
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      // Create the object store if it doesn't exist
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, {
+          keyPath: "id",
+          autoIncrement: true,
+        });
+      }
+    };
+
+    // Database opened successfully
+    request.onsuccess = () => {
+      const db = request.result;
+
+      resolve({
+        /**
+         * Adds a new cost item to the database.
+         * The date attached to every cost item is the date on which it was added.
+         * @param {Object} cost - Cost object with sum, currency, category, description
+         * @returns {Promise<Object>} Promise resolving to saved cost item
+         */
+        addCost(cost) {
+          return new Promise((res, rej) => {
+            const tx = db.transaction(STORE_NAME, "readwrite");
+            const store = tx.objectStore(STORE_NAME);
+            const now = new Date();
+
+            const item = {
+              sum: Number(cost.sum),
+              currency: String(cost.currency),
+              category: String(cost.category),
+              description: String(cost.description),
+              Date: { day: now.getDate() },
+              // Internal metadata used for year/month filtering
+              _dateMeta: {
+                year: now.getFullYear(),
+                month: now.getMonth() + 1,
+                day: now.getDate(),
+              },
+            };
+
+            const req = store.add(item);
+            req.onsuccess = () => res(item);
+            req.onerror = () => rej(req.error);
+          });
+        },
+
+        /**
+         * Generates a monthly report with costs filtered by year and month.
+         * Signature must stay exactly: getReport(year, month, currency).
+         * @param {number} year - Year to filter by
+         * @param {number} month - Month to filter by (1-12)
+         * @param {string} currency - Target currency for conversion
+         * @returns {Promise<Object>} Promise resolving to report object with costs and total
+         */
+        async getReport(year, month, currency) {
+          const all = await getAllCosts(db);
+
+          // Filter costs by year and month
+          const filtered = all.filter((c) => {
+            return (
+              c &&
+              c._dateMeta &&
+              c._dateMeta.year === year &&
+              c._dateMeta.month === month
+            );
+          });
+
+          // Fetch rates (settings -> ratesUrl -> default)
+          const rates = await fetchRates();
+
+          let total = 0;
+          const costs = filtered.map((c) => {
+            const converted = convertAmount(
+              Number(c.sum),
+              c.currency,
+              currency,
+              rates
+            );
+            total += converted;
+
+            return {
+              sum: Number(c.sum),
+              currency: c.currency,
+              category: c.category,
+              description: c.description,
+              Date: { day: c._dateMeta.day },
+            };
+          });
+
+          total = Math.round(total * 100) / 100;
+
+          return {
+            year,
+            month,
+            costs,
+            total: { currency, total },
+          };
+        },
+      });
+    };
+
+    request.onerror = () => reject(request.error);
+  });
+}
