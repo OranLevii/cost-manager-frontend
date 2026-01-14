@@ -21,17 +21,8 @@ import {
 } from "recharts";
 import { openCostsDB } from "../idb/idb.js";
 
-// Supported currency codes
 const CURRENCIES = ["USD", "ILS", "GBP", "EURO"];
 
-// Same default as your idb.js
-const DEFAULT_RATES_URL =
-  "https://oranlevii.github.io/cost-manager-rates/rates.json";
-
-// Same key as your idb.js
-const RATES_URL_STORAGE_KEY = "ratesUrl";
-
-// Color palette for pie chart segments
 const COLORS = [
   "#0088FE",
   "#00C49F",
@@ -42,51 +33,13 @@ const COLORS = [
   "#7DD3FC",
 ];
 
-async function fetchRatesSameAsIDB() {
-  const customUrl = localStorage.getItem(RATES_URL_STORAGE_KEY);
-  const url =
-    customUrl && customUrl.trim().length > 0
-      ? customUrl.trim()
-      : DEFAULT_RATES_URL;
-
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("Failed to fetch exchange rates");
-  return res.json();
-}
-
-// rates are: 1 USD = X currency
-function convertAmount(amount, fromCurrency, toCurrency, rates) {
-  if (fromCurrency === toCurrency) return amount;
-
-  const fromRate = rates[fromCurrency];
-  const toRate = rates[toCurrency];
-  if (!fromRate || !toRate) throw new Error("Missing currency rate");
-
-  const usd = Number(amount) / fromRate;
-  return usd * toRate;
-}
-
-/**
- * Builds pie chart data aggregated by category (in targetCurrency)
- * report.costs are original amounts+currencies (as in your idb.js)
- */
-function buildCategoryData(report, targetCurrency, rates) {
+function buildCategoryData(report) {
   const map = {};
-
-  for (let i = 0; i < (report.costs || []).length; i++) {
-    const c = report.costs[i];
+  for (const c of report.costs || []) {
     const key = c.category || "Other";
-
-    const converted = convertAmount(
-      Number(c.sum),
-      String(c.currency),
-      targetCurrency,
-      rates
-    );
-
-    map[key] = (map[key] || 0) + converted;
+    const v = Number(c.convertedSum || 0);
+    map[key] = (map[key] || 0) + v;
   }
-
   return Object.keys(map).map((k) => ({
     name: k,
     value: Math.round(map[k] * 100) / 100,
@@ -97,7 +50,6 @@ export default function PieChartPage() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [currency, setCurrency] = useState("USD");
-
   const [msg, setMsg] = useState(null);
   const [data, setData] = useState([]);
 
@@ -108,19 +60,17 @@ export default function PieChartPage() {
 
       const y = Number(year);
       const m = Number(month);
+
       if (!Number.isFinite(y) || y < 1900) throw new Error("Invalid year");
       if (!Number.isFinite(m) || m < 1 || m > 12)
         throw new Error("Invalid month (1-12)");
 
-      const rates = await fetchRatesSameAsIDB();
-
       const db = await openCostsDB("costsdb", 1);
 
-      // IMPORTANT: call signature WITHOUT rates param
+      // ✅ One source of truth: idb.getReport does conversion
       const rep = await db.getReport(y, m, currency);
 
-      const d = buildCategoryData(rep, currency, rates);
-
+      const d = buildCategoryData(rep);
       setData(d);
       setMsg({ type: "success", text: "Pie chart data loaded." });
     } catch (err) {
