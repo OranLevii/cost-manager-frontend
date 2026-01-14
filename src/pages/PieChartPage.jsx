@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import {
   Alert,
   Box,
@@ -11,57 +11,88 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { PieChart, Pie, Tooltip, Legend, ResponsiveContainer, Cell } from "recharts";
+import {
+  PieChart,
+  Pie,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  Cell,
+} from "recharts";
 import { openCostsDB } from "../idb/idb.js";
-import { fetchRates } from "../services/ratesService.js";
 
 // Supported currency codes
 const CURRENCIES = ["USD", "ILS", "GBP", "EURO"];
+
+// Same default as your idb.js
+const DEFAULT_RATES_URL =
+  "https://oranlevii.github.io/cost-manager-rates/rates.json";
+
+// Same key as your idb.js
+const RATES_URL_STORAGE_KEY = "ratesUrl";
+
 // Color palette for pie chart segments
-const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#A28BFF", "#FF5A7A", "#7DD3FC"];
+const COLORS = [
+  "#0088FE",
+  "#00C49F",
+  "#FFBB28",
+  "#FF8042",
+  "#A28BFF",
+  "#FF5A7A",
+  "#7DD3FC",
+];
+
+async function fetchRatesSameAsIDB() {
+  const customUrl = localStorage.getItem(RATES_URL_STORAGE_KEY);
+  const url =
+    customUrl && customUrl.trim().length > 0
+      ? customUrl.trim()
+      : DEFAULT_RATES_URL;
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch exchange rates");
+  return res.json();
+}
+
+// rates are: 1 USD = X currency
+function convertAmount(amount, fromCurrency, toCurrency, rates) {
+  if (fromCurrency === toCurrency) return amount;
+
+  const fromRate = rates[fromCurrency];
+  const toRate = rates[toCurrency];
+  if (!fromRate || !toRate) throw new Error("Missing currency rate");
+
+  const usd = Number(amount) / fromRate;
+  return usd * toRate;
+}
 
 /**
- * Builds pie chart data aggregated by category
- * Converts all costs to the target currency
- * @param {Object} report - Report object containing costs array
- * @param {string} targetCurrency - Currency to convert all costs to
- * @param {Object} rates - Exchange rates object
- * @returns {Array} Array of objects with category name and total value
+ * Builds pie chart data aggregated by category (in targetCurrency)
+ * report.costs are original amounts+currencies (as in your idb.js)
  */
 function buildCategoryData(report, targetCurrency, rates) {
-  // Map to aggregate costs by category
   const map = {};
 
-  // Process each cost item
-  for (let i = 0; i < report.costs.length; i++) {
+  for (let i = 0; i < (report.costs || []).length; i++) {
     const c = report.costs[i];
-
-    // Get exchange rates for conversion
-    const fromRate = rates[c.currency];
-    const toRate = rates[targetCurrency];
-    if (!fromRate || !toRate) continue;
-
-    // Convert to USD first, then to target currency
-    const usd = Number(c.sum) / fromRate;
-    const converted = usd * toRate;
-
-    // Aggregate by category (default to "Other" if missing)
     const key = c.category || "Other";
+
+    const converted = convertAmount(
+      Number(c.sum),
+      String(c.currency),
+      targetCurrency,
+      rates
+    );
+
     map[key] = (map[key] || 0) + converted;
   }
 
-  // Convert map to array format for pie chart
   return Object.keys(map).map((k) => ({
     name: k,
     value: Math.round(map[k] * 100) / 100,
   }));
 }
 
-/**
- * PieChartPage Component
- * Displays a pie chart showing cost distribution by category for a selected month
- * Allows filtering by year, month, and currency
- */
 export default function PieChartPage() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth() + 1);
@@ -70,34 +101,36 @@ export default function PieChartPage() {
   const [msg, setMsg] = useState(null);
   const [data, setData] = useState([]);
 
-  /**
-   * Fetches and processes data for the pie chart
-   * Retrieves costs for the selected month and aggregates by category
-   */
-  function onRun() {
-    setMsg(null);
-    setData([]);
+  async function onRun() {
+    try {
+      setMsg(null);
+      setData([]);
 
-    // Fetch rates, then get report, then build chart data
-    fetchRates()
-      .then((rates) =>
-        openCostsDB("costsdb", 1).then((db) =>
-          db.getReport(Number(year), Number(month), currency, rates).then((rep) => {
-            const d = buildCategoryData(rep, currency, rates);
-            return { d };
-          })
-        )
-      )
-      .then(({ d }) => {
-        setData(d);
-        setMsg({ type: "success", text: "Pie chart data loaded." });
-      })
-      .catch((err) => {
-        setMsg({ type: "error", text: err?.message || "Failed to load pie chart." });
+      const y = Number(year);
+      const m = Number(month);
+      if (!Number.isFinite(y) || y < 1900) throw new Error("Invalid year");
+      if (!Number.isFinite(m) || m < 1 || m > 12)
+        throw new Error("Invalid month (1-12)");
+
+      const rates = await fetchRatesSameAsIDB();
+
+      const db = await openCostsDB("costsdb", 1);
+
+      // IMPORTANT: call signature WITHOUT rates param
+      const rep = await db.getReport(y, m, currency);
+
+      const d = buildCategoryData(rep, currency, rates);
+
+      setData(d);
+      setMsg({ type: "success", text: "Pie chart data loaded." });
+    } catch (err) {
+      setMsg({
+        type: "error",
+        text: err?.message || "Failed to load pie chart.",
       });
+    }
   }
 
-  // Render the pie chart page with controls and chart visualization
   return (
     <Box sx={{ maxWidth: 1000 }}>
       <Typography variant="h5" sx={{ mb: 2 }}>
@@ -113,12 +146,23 @@ export default function PieChartPage() {
             alignItems: "center",
           }}
         >
-          <TextField label="Year" value={year} onChange={(e) => setYear(e.target.value)} />
-          <TextField label="Month (1-12)" value={month} onChange={(e) => setMonth(e.target.value)} />
-
+          <TextField
+            label="Year"
+            value={year}
+            onChange={(e) => setYear(e.target.value)}
+          />
+          <TextField
+            label="Month (1-12)"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+          />
           <FormControl>
             <InputLabel>Currency</InputLabel>
-            <Select label="Currency" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+            <Select
+              label="Currency"
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
+            >
               {CURRENCIES.map((c) => (
                 <MenuItem key={c} value={c}>
                   {c}
@@ -148,8 +192,11 @@ export default function PieChartPage() {
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie data={data} dataKey="value" nameKey="name" label>
-                {data.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                {data.map((_, index) => (
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={COLORS[index % COLORS.length]}
+                  />
                 ))}
               </Pie>
               <Tooltip />
