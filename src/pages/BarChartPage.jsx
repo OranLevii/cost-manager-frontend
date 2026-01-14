@@ -22,10 +22,8 @@ import {
 } from "recharts";
 import { openCostsDB } from "../idb/idb.js";
 
-// Supported currency codes
 const CURRENCIES = ["USD", "ILS", "GBP", "EURO"];
 
-// Month names for display in the chart
 const MONTH_NAMES = [
   "Jan","Feb","Mar","Apr","May","Jun",
   "Jul","Aug","Sep","Oct","Nov","Dec",
@@ -47,21 +45,21 @@ export default function BarChartPage() {
 
       const db = await openCostsDB("costsdb", 1);
 
-      // ✅ מקור אמת יחיד להמרות: idb.js (כולל DEFAULT + settings)
-      const yearly = await db.getYearlyReport(y, currency);
+      // 12 reports (כאן אין ratesService ואין פרמטר rates)
+      const reports = await Promise.all(
+        Array.from({ length: 12 }, (_, i) => db.getReport(y, i + 1, currency))
+      );
 
-      const d = (yearly.months || []).map((v, i) => ({
+      // משתמשים ב-total שכבר מחושב במטבע שבחרת
+      const d = reports.map((rep, i) => ({
         month: MONTH_NAMES[i],
-        total: Math.round(Number(v || 0) * 100) / 100,
+        total: Math.round(Number(rep?.total?.total || 0) * 100) / 100,
       }));
 
       setData(d);
       setMsg({ type: "success", text: "Bar chart data loaded." });
     } catch (err) {
-      setMsg({
-        type: "error",
-        text: err?.message || "Failed to load bar chart.",
-      });
+      setMsg({ type: "error", text: err?.message || "Failed to load bar chart." });
     }
   }
 
