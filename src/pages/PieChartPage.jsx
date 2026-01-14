@@ -21,10 +21,10 @@ import {
 } from "recharts";
 import { openCostsDB } from "../idb/idb.js";
 
-// Keep same currency codes as the rest of your app
+// Same currency codes as Report/Bar
 const CURRENCIES = ["USD", "ILS", "GBP", "EURO"];
 
-// Colors for the pie slices
+// Color palette for pie chart segments
 const COLORS = [
   "#0088FE",
   "#00C49F",
@@ -36,19 +36,17 @@ const COLORS = [
 ];
 
 /**
- * Build pie chart data by category.
- * IMPORTANT:
- * - We do NOT fetch rates here.
- * - We do NOT convert amounts here.
- * We rely on idb.js to return a report where each row includes:
- *   convertedSum (number) and targetCurrency (string)
+ * Build pie data aggregated by category, in TARGET currency.
+ * We rely on idb.getReport(...) to already do conversion and return:
+ *  - report.total.currency = target currency
+ *  - report.costs[i].convertedSum = converted amount in target currency
  */
 function buildCategoryData(report) {
   const map = {};
 
   for (const c of report?.costs || []) {
     const key = c.category || "Other";
-    const v = Number(c.convertedSum || 0);
+    const v = Number(c.convertedSum ?? 0);
     map[key] = (map[key] || 0) + v;
   }
 
@@ -65,23 +63,19 @@ export default function PieChartPage() {
 
   const [msg, setMsg] = useState(null);
   const [data, setData] = useState([]);
-  const [targetCurrency, setTargetCurrency] = useState(currency);
+  const [targetCurrency, setTargetCurrency] = useState("USD");
 
   async function onRun() {
     try {
       setMsg(null);
-      დედ
       setData([]);
 
       const y = Number(year);
       const m = Number(month);
 
-      if (!Number.isFinite(y) || y < 1900) {
-        throw new Error("Invalid year");
-      }
-      if (!Number.isFinite(m) || m < 1 || m > 12) {
+      if (!Number.isFinite(y) || y < 1900) throw new Error("Invalid year");
+      if (!Number.isFinite(m) || m < 1 || m > 12)
         throw new Error("Invalid month (1-12)");
-      }
 
       const db = await openCostsDB("costsdb", 1);
 
@@ -165,9 +159,7 @@ export default function PieChartPage() {
 
       <Paper sx={{ p: 2, height: 420 }}>
         {!hasData ? (
-          <Typography>
-            No data to display{targetCurrency ? ` (${targetCurrency})` : ""}.
-          </Typography>
+          <Typography>No data to display ({targetCurrency}).</Typography>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
