@@ -15,25 +15,25 @@ export async function fetchRates() {
 
   if (cache && cacheUrl === url) return cache;
 
-  const isExternal = /^https?:\/\//i.test(url);
-
-  // ✅ If external URL -> go through our proxy endpoint
-  const finalUrl = isExternal
-    ? `/api/rates?url=${encodeURIComponent(url)}`
-    : url;
-
   let res;
   try {
-    res = await fetch(finalUrl, { cache: "no-store" });
+    res = await fetch(url, { cache: "no-store" });
   } catch {
-    throw new Error("Failed to fetch rates (network/CORS)");
+    throw new Error("Failed to fetch exchange rates (network / CORS error)");
   }
 
   if (!res.ok) {
-    throw new Error(`Failed to fetch rates: HTTP ${res.status}`);
+    throw new Error(`Failed to fetch exchange rates (HTTP ${res.status})`);
   }
 
-  const rates = await res.json();
+  let rates;
+  try {
+    rates = await res.json();
+  } catch {
+    // ✅ במקום שגיאת JSON מכוערת
+    throw new Error("The provided URL does not return a valid JSON file");
+  }
+
   cache = rates;
   cacheUrl = url;
   return rates;
