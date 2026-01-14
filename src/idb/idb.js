@@ -4,7 +4,7 @@ const STORE_NAME = "costs";
 // Default exchange rates URL (must return JSON like:
 // { "USD":1, "GBP":0.6, "EURO":0.7, "ILS":3.4 })
 const DEFAULT_RATES_URL =
-  "https://oranlevii.github.io/cost-manager-rates/rates.json";
+  "https://cost-manager-frontend-fg8b.onrender.com/rates.json";
 
 // LocalStorage keys
 const SETTINGS_KEY = "cm_settings_v1";
