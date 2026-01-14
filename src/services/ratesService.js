@@ -30,7 +30,6 @@ export async function fetchRates() {
   try {
     rates = await res.json();
   } catch {
-    // ✅ במקום שגיאת JSON מכוערת
     throw new Error("The provided URL does not return a valid JSON file");
   }
 
