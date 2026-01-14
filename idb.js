@@ -9,7 +9,7 @@
   var COMPAT_RATES_URL_KEY = "ratesUrl";
 
   // Default exchange rates URL (always works on the web)
-  var DEFAULT_RATES_URL = "https://oranlevii.github.io/cost-manager-rates/rates.json";
+  var DEFAULT_RATES_URL = "https://cost-manager-frontend-fg8b.onrender.com/rates.json";
 
   // Global database reference
   var _db = null;
