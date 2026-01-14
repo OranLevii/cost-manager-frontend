@@ -21,8 +21,10 @@ import {
 } from "recharts";
 import { openCostsDB } from "../idb/idb.js";
 
+// Keep same currency codes as the rest of your app
 const CURRENCIES = ["USD", "ILS", "GBP", "EURO"];
 
+// Colors for the pie slices
 const COLORS = [
   "#0088FE",
   "#00C49F",
@@ -33,13 +35,23 @@ const COLORS = [
   "#7DD3FC",
 ];
 
+/**
+ * Build pie chart data by category.
+ * IMPORTANT:
+ * - We do NOT fetch rates here.
+ * - We do NOT convert amounts here.
+ * We rely on idb.js to return a report where each row includes:
+ *   convertedSum (number) and targetCurrency (string)
+ */
 function buildCategoryData(report) {
   const map = {};
-  for (const c of report.costs || []) {
+
+  for (const c of report?.costs || []) {
     const key = c.category || "Other";
     const v = Number(c.convertedSum || 0);
     map[key] = (map[key] || 0) + v;
   }
+
   return Object.keys(map).map((k) => ({
     name: k,
     value: Math.round(map[k] * 100) / 100,
@@ -50,36 +62,50 @@ export default function PieChartPage() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [currency, setCurrency] = useState("USD");
+
   const [msg, setMsg] = useState(null);
   const [data, setData] = useState([]);
+  const [targetCurrency, setTargetCurrency] = useState(currency);
 
   async function onRun() {
     try {
       setMsg(null);
+      დედ
       setData([]);
 
       const y = Number(year);
       const m = Number(month);
 
-      if (!Number.isFinite(y) || y < 1900) throw new Error("Invalid year");
-      if (!Number.isFinite(m) || m < 1 || m > 12)
+      if (!Number.isFinite(y) || y < 1900) {
+        throw new Error("Invalid year");
+      }
+      if (!Number.isFinite(m) || m < 1 || m > 12) {
         throw new Error("Invalid month (1-12)");
+      }
 
       const db = await openCostsDB("costsdb", 1);
 
-      // ✅ One source of truth: idb.getReport does conversion
       const rep = await db.getReport(y, m, currency);
 
-      const d = buildCategoryData(rep);
-      setData(d);
-      setMsg({ type: "success", text: "Pie chart data loaded." });
+      const chartData = buildCategoryData(rep);
+      setData(chartData);
+      setTargetCurrency(rep?.total?.currency || currency);
+
+      if (chartData.length === 0) {
+        setMsg({ type: "info", text: "No data for selected month/year." });
+      } else {
+        setMsg({ type: "success", text: "Pie chart loaded." });
+      }
     } catch (err) {
+      console.error("PIE FAILED", err);
       setMsg({
         type: "error",
         text: err?.message || "Failed to load pie chart.",
       });
     }
   }
+
+  const hasData = data.some((x) => Number(x.value) > 0);
 
   return (
     <Box sx={{ maxWidth: 1000 }}>
@@ -98,11 +124,13 @@ export default function PieChartPage() {
         >
           <TextField
             label="Year"
+            type="number"
             value={year}
             onChange={(e) => setYear(e.target.value)}
           />
           <TextField
             label="Month (1-12)"
+            type="number"
             value={month}
             onChange={(e) => setMonth(e.target.value)}
           />
@@ -136,8 +164,10 @@ export default function PieChartPage() {
       </Paper>
 
       <Paper sx={{ p: 2, height: 420 }}>
-        {data.length === 0 ? (
-          <Typography>No data for selected month/year.</Typography>
+        {!hasData ? (
+          <Typography>
+            No data to display{targetCurrency ? ` (${targetCurrency})` : ""}.
+          </Typography>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
