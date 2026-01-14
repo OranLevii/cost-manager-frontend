@@ -3,29 +3,55 @@ const STORE_NAME = "costs";
 
 // Default exchange rates URL (must return JSON like:
 // { "USD":1, "GBP":0.6, "EURO":0.7, "ILS":3.4 })
-const DEFAULT_RATES_URL = "https://oranlevii.github.io/cost-manager-rates/rates.json";
+const DEFAULT_RATES_URL =
+  "https://oranlevii.github.io/cost-manager-rates/rates.json";
 
-// LocalStorage key for user-defined rates URL (from Settings screen)
+// LocalStorage keys
+const SETTINGS_KEY = "cm_settings_v1";
 const RATES_URL_STORAGE_KEY = "ratesUrl";
 
 // Cache for exchange rates to avoid repeated fetch calls
 let ratesCache = null;
+let ratesCacheUrl = null;
+
+/**
+ * Resolve the rates URL from settings (preferred), then compat key, then default.
+ */
+function resolveRatesUrl() {
+  // 1) Try cm_settings_v1 (preferred)
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const sUrl = parsed?.ratesUrl;
+      if (typeof sUrl === "string" && sUrl.trim().length > 0) {
+        return sUrl.trim();
+      }
+    }
+  } catch (e) {
+    // ignore and fallback
+  }
+
+  // 2) Try direct key (compat)
+  const direct = localStorage.getItem(RATES_URL_STORAGE_KEY);
+  if (direct && direct.trim().length > 0) return direct.trim();
+
+  // 3) Default
+  return DEFAULT_RATES_URL;
+}
 
 /**
  * Fetches exchange rates from either a user-defined URL (Settings) or the default URL.
- * If rates were already fetched, returns them from cache.
+ * If rates were already fetched for the SAME URL, returns them from cache.
  * @returns {Promise<Object>} Exchange rates object
  */
 async function fetchRates() {
-  if (ratesCache) {
+  const url = resolveRatesUrl();
+
+  // If cache exists but URL changed -> invalidate cache
+  if (ratesCache && ratesCacheUrl === url) {
     return ratesCache;
   }
-
-  const customUrl = localStorage.getItem(RATES_URL_STORAGE_KEY);
-  const url =
-    customUrl && customUrl.trim().length > 0
-      ? customUrl.trim()
-      : DEFAULT_RATES_URL;
 
   const response = await fetch(url);
   if (!response.ok) {
@@ -34,6 +60,7 @@ async function fetchRates() {
 
   const rates = await response.json();
   ratesCache = rates;
+  ratesCacheUrl = url;
   return rates;
 }
 
@@ -50,14 +77,11 @@ function convertAmount(amount, fromCurrency, toCurrency, rates) {
   if (fromCurrency === toCurrency) {
     return amount;
   }
-
   const fromRate = rates[fromCurrency];
   const toRate = rates[toCurrency];
-
   if (!fromRate || !toRate) {
     throw new Error("Missing currency rate");
   }
-
   // Convert to USD first, then to target currency
   const usdAmount = amount / fromRate;
   return usdAmount * toRate;
@@ -72,7 +96,6 @@ function getAllCosts(db) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readonly");
     const store = tx.objectStore(STORE_NAME);
-
     const req = store.getAll();
     req.onsuccess = () => resolve(req.result || []);
     req.onerror = () => reject(req.error);
@@ -93,7 +116,6 @@ export function openCostsDB(databaseName, databaseVersion) {
     // Handle database schema creation/upgrade
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
-
       // Create the object store if it doesn't exist
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, {
@@ -118,19 +140,14 @@ export function openCostsDB(databaseName, databaseVersion) {
           return new Promise((res, rej) => {
             const tx = db.transaction(STORE_NAME, "readwrite");
             const store = tx.objectStore(STORE_NAME);
-
             const now = new Date();
 
-            // Keep required fields and store date metadata for filtering.
-            // The report format requires "Date:{day:<number>}".
             const item = {
               sum: Number(cost.sum),
               currency: String(cost.currency),
               category: String(cost.category),
               description: String(cost.description),
-
               Date: { day: now.getDate() },
-
               // Internal metadata used for year/month filtering
               _dateMeta: {
                 year: now.getFullYear(),
@@ -148,7 +165,6 @@ export function openCostsDB(databaseName, databaseVersion) {
         /**
          * Generates a monthly report with costs filtered by year and month.
          * Signature must stay exactly: getReport(year, month, currency).
-         * All costs are converted to the requested currency using fetched exchange rates.
          * @param {number} year - Year to filter by
          * @param {number} month - Month to filter by (1-12)
          * @param {string} currency - Target currency for conversion
@@ -167,12 +183,10 @@ export function openCostsDB(databaseName, databaseVersion) {
             );
           });
 
-          // Fetch rates (uses default URL if Settings URL is missing)
+          // Fetch rates (settings -> ratesUrl -> default)
           const rates = await fetchRates();
 
-          // Calculate total by converting all costs to target currency
           let total = 0;
-
           const costs = filtered.map((c) => {
             const converted = convertAmount(
               Number(c.sum),
